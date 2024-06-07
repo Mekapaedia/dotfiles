@@ -1,0 +1,3 @@
+HOST="$(hostname -s)"
+USER_ME="$(whoami)"
+PS1='[${USER_ME}'"@${HOST} "'${PWD}]$ '

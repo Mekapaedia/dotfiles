@@ -1,0 +1,453 @@
+ulimit -s 65536
+COLCLEAR="$(tput sgr0)"
+export COLCLEAR
+export COLORTERM=truecolor
+unset XTERM_VERSION
+PATH_PREPEND=""
+GOT_RG=
+
+function module_load
+{
+    REQ_MODULE="$1"
+    shift
+    if [ -z "${LOADEDMODULES}" ] || [ "$(echo "${LOADEDMODULES}" | grep -c "${REQ_MODULE}")" -lt 1 ]
+    then
+        module load "${REQ_MODULE}"
+        if type finalise_paths &> /dev/null
+        then
+            finalise_paths
+        fi
+    fi
+}
+
+
+function check_module_system
+{
+    if ! module help &> /dev/null
+    then
+        . /arm/tools/setup/init/bash
+    fi
+
+    if ! bjobs -h &> /dev/null
+    then
+        if [ "$(rhe_ver)" -lt 7 ]
+        then
+            return
+        fi
+        module load core
+        module load arm/cluster
+    fi
+    module_load core
+    module_load eda
+    module_load util
+    module_load swdev
+    module_load syslib
+}
+
+function module_load_if
+{
+    if ! command -v module &> /dev/null
+    then
+        check_module_system
+    fi
+    if command -v module &> /dev/null
+    then
+        module_load "$1"
+    fi
+
+}
+
+function add_local_paths
+{
+    if [ ! -d "${HOME}/tools/$(rhe_ver_full)/bin" ]
+    then
+        mkdir -p "${HOME}/tools/$(rhe_ver_full)/bin"
+    fi
+    export PATH="${PATH_PREPEND}:${HOME}/tools/$(rhe_ver_full)/bin:${HOME}/bin:${HOME}/.local/$(rhe_ver_full)/bin:${PATH}"
+    export LD_LIBRARY_PATH="${HOME}/tools/$(rhe_ver_full)/lib:${HOME}/.local/$(rhe_ver_full)/lib:${LD_LIBRARY_PATH}"
+    export PKG_CONFIG_PATH="${HOME}/tools/$(rhe_ver_full)/lib/pkgconfig:${PKG_CONFIG_PATH}"
+    hash -r
+}
+
+function reset_paths
+{
+    export PATH="$(echo -n "${PATH}" | tr ':' '\n' | grep -v "${USER}\|x86_64\|aarch64"| tr '\n' ':' | sed 's/:$/\n/')"
+    export PATH_USER="$(echo -n "${PATH_USER}" | tr ':' '\n' | grep -v "${USER}\|x86_64\|aarch64"| tr '\n' ':' | sed 's/:$/\n/')"
+    export PATH_modshare="$(echo -n "${PATH_modshare}" | tr ':' '\n' | grep -v "${USER}\|x86_64\|aarch64"| tr '\n' ':' | sed 's/:$/\n/')"
+    export LD_LIBRARY_PATH="$(echo -n "${LD_LIBRARY_PATH}" | tr ':' '\n' | grep -v "${USER}\|x86_64\|aarch64"| tr '\n' ':' | sed 's/:$/\n/')"
+    export LD_LIBRARY_PATH_USER="$(echo -n "${LD_LIBRARY_PATH_USER}" | tr ':' '\n' | grep -v "${USER}\|x86_64\|aarch64"| tr '\n' ':' | sed 's/:$/\n/')"
+    export LD_LIBRARY_PATH_modshare="$(echo -n "${LD_LIBRARY_PATH_modshare}" | tr ':' '\n' | grep -v "${USER}\|x86_64\|aarch64"| tr '\n' ':' | sed 's/:$/\n/')"
+    export PKG_CONFIG_PATH="$(echo -n "${PKG_CONFIG_PATH}" | tr ':' '\n' | grep -v "${USER}\|x86_64\|aarch64"| tr '\n' ':' | sed 's/:$/\n/')"
+}
+
+if [ "${SYSTEM_SWITCHED}" -eq 1 ]
+then
+    if command -v module &> /dev/null
+    then
+        module purge
+    fi
+    reset_paths
+    check_module_system
+fi
+
+add_local_paths
+
+function finalise_paths
+{
+    add_local_paths
+    PATH="$(echo -n "${PATH}" | awk -v RS=: '!($0 in a) {a[$0]; printf("%s%s", length(a) > 1 ? ":" : "", $0)}')"
+    LD_LIBRARY_PATH="$(echo -n "${LD_LIBRARY_PATH}" | awk -v RS=: '!($0 in a) {a[$0]; printf("%s%s", length(a) > 1 ? ":" : "", $0)}')"
+    MANPATH="$(echo -n "${MANPATH}" | awk -v RS=: '!($0 in a) {a[$0]; printf("%s%s", length(a) > 1 ? ":" : "", $0)}')"
+    PKG_CONFIG_PATH="$(echo -n "${PKG_CONFIG_PATH}" | awk -v RS=: '!($0 in a) {a[$0]; printf("%s%s", length(a) > 1 ? ":" : "", $0)}')"
+    check_module_system
+
+    export PATH
+    export MANPATH
+    export LD_LIBRARY_PATH
+    export PKG_CONFIG_PATH
+    hash -r
+}
+
+function pwd_sht
+{
+    BASEDIR="$(realpath "${PWD}")"
+    git_prompt
+    if [ -n "${GITFULLDIR}" ]
+    then
+        BASEDIR="$(echo "${BASEDIR}" | sed s%"${GITFULLDIR}"%%)"
+    elif echo "${BASEDIR}" | grep -q "${HOME}"
+    then
+        BASEDIR="$(echo "${BASEDIR}" | sed s%"${HOME}"%~%)"
+    fi
+    SHORTPATH="$(echo "${BASEDIR}" | awk \
+        'BEGIN { FS="/" }; \
+        { for (i = 1; i < NF; i = i + 1) printf "%s/",substr($i,1,2); \
+        printf "%s",$NF; };')"
+    export SHORTPATH
+}
+
+function git_prompt
+{
+    GITPROMPT=""
+    GITDIR=""
+    GITBRANCH=""
+    GITFULLDIR="$(git rev-parse --show-toplevel 2>/dev/null)"
+    if [ -n "${GITFULLDIR}" ]
+    then
+        if grep -q ref "${GITFULLDIR}/.git/HEAD" &>/dev/null
+        then
+            GITBRANCH="$(cut -f3- -d/ "${GITFULLDIR}/.git/HEAD")"
+        else
+            GITBRANCH="$(head -c8 "${GITFULLDIR}/.git/HEAD")"
+        fi
+        #GITBRANCH="$(git symbolic-ref -q --short HEAD || echo "$(git rev-parse --short HEAD)")"
+        GITDIR="$(basename "${GITFULLDIR}")"
+        GITPROMPT+="(${GITDIR}:"
+        GITPROMPT+="${GITBRANCH}"
+        GITPROMPT+="\[\033[92m\]"
+        GITPROMPT+=")"
+    fi
+    export GITPROMPT
+}
+
+function prompt_command
+{
+    pwd_sht
+    MACHINE_COLOUR="32"
+    if [ "${SYSTEM_ARCH}" = "aarch64" ]
+    then
+        MACHINE_COLOUR="36"
+    fi
+    PS1="\[${COLCLEAR}\][\[\033[33m\]\u\[${COLCLEAR}\]@\[\033[${MACHINE_COLOUR}m\]\h\[${COLCLEAR}\]"
+    PS1+="\[\033[91m\]${PERF_ENV_NAME}\[${COLCLEAR}\] "
+    PS1+="\[\033[92m\]${GITPROMPT}\[${COLCLEAR}\]"
+    PS1+="\[\033[01;34m\]${SHORTPATH}\[${COLCLEAR}\]"
+    PS1+="\[${COLCLEAR}\]]\\$ "
+    export PS1
+}
+
+export PROMPT_COMMAND="prompt_command"
+prompt_command
+PERF_ENV_NAME=""
+
+export LIBGL_ALWAYS_INDIRECT=1
+
+export MODULE_FILE_LIST="${HOME}/.mgrep/$(rhe_ver_full)/modules"
+export MODULE_LOCK="${HOME}/.mgrep/$(rhe_ver_full)/modules.lock"
+
+function mgrep_original
+{
+    "/arm/tools/setup/bin/mgrep" $@
+}
+
+function module_list
+{
+    module list -t 2>&1
+}
+
+
+if ! rg -h &> /dev/null
+then
+    module_load_if "burntsushi/ripgrep"
+fi
+
+if ! fd -h &> /dev/null
+then
+    module_load_if "rust/rust-fd"
+fi
+
+function module_find_all
+{
+    if ! command -v fd &> /dev/null || ! fd -h &> /dev/null
+    then
+        (cd /arm/tools && find . -maxdepth 5 -name "$(rhe_ver_full)" -o -name "linux64" -type d -prune 2>/dev/null | sed 's/^\.\///' | sed 's/\/\(rhe\|linux\).*//')
+    else
+        fd -IH -t d -d5 -I --base-directory /arm/tools/ "^$(rhe_ver_full)$|^linux64$" --prune -x echo {//} | sed 's/^\.\///'
+    fi
+}
+
+function mgrep_update
+{
+    UPDATE_FORCE=0
+    if [ -n "$1" ] && [ "$1" = "force" ]
+    then
+        shift
+        UPDATE_FORCE=1
+        rm -f "${MODULE_LOCK}"
+    fi
+    if [ ! -f "${MODULE_FILE_LIST}" ] || [ "${UPDATE_FORCE}" -eq 1 ] || [ "$(expr "$(date +%s)" - "$(date +%s -r "${MODULE_FILE_LIST}")")" -gt 108000 ]
+    then
+        if [ -f "${MODULE_LOCK}" ]
+        then
+            return
+        fi
+        echo "Updating modules list, this may take some time..."
+        mkdir -p "$(dirname "${MODULE_FILE_LIST}")"
+        touch "${MODULE_LOCK}"
+        module_find_all > "${MODULE_FILE_LIST}"; rm "${MODULE_LOCK}"
+        echo "Updating modules complete"
+    fi
+}
+
+function mgrep_original_formatted
+{
+    SEARCHED_MODULE="$1"
+    shift
+    mgrep_original "${SEARCHED_MODULE}" | tr -s '\t' ' ' | tr -s ' ' | cut -d' ' -f1
+}
+
+function module_grepper
+{
+    SEARCHED_MODULE="$1"
+    shift
+    if ! rg -h &> /dev/null
+    then
+        grep "${SEARCHED_MODULE}" "${MODULE_FILE_LIST}"
+    else
+        rg -NS "${SEARCHED_MODULE}" "${MODULE_FILE_LIST}"
+    fi
+}
+
+function mgrep_cached
+{
+    SEARCHED_MODULE="$1"
+    shift
+    module_grepper "${SEARCHED_MODULE}"
+}
+alias mgrep=mgrep_cached
+
+function newest_module
+{
+    SEARCHED_MODULE="$1"
+    shift
+    mgrep_cached "${SEARCHED_MODULE}" | sort -V | tail -1
+}
+
+BSUB_PROJ_CODE="PJ10000013"
+BSUB_PROJ_CODE_ALT="PJ33000227"
+BSUB_PROJ_CODE_ALT_ALT="PJ1000598"
+BSUB_DEF_CPUS=8
+BSUB_DEF_OS_VERSION="rhe8"
+BSUB_DEF_MEM="16000"
+BSUB_DEF_ARCH="x86_64"
+
+function bsub_term_send
+{
+    PROJ_CODE="$1"
+    shift
+    BSUB_CPUS="$1"
+    shift
+    BSUB_OS_VERSION="$1"
+    shift
+    BSUB_MEM="$1"
+    shift
+    BSUB_ARCH="$1"
+    shift
+    bsub -W 14000 -P "${PROJ_CODE}" -R "select[${BSUB_OS_VERSION} && ${BSUB_ARCH}]" -R "rusage[mem=${BSUB_MEM}]" -R 'span[hosts=1]' -Jd 'inter-1.0-universal' -n "${BSUB_CPUS}" -q PD -Is dbus-launch bash "${HOME}/bin/start_urxvt.sh" "${BSUB_OS_VERSION}-${BSUB_ARCH}"
+}
+
+function bsub_term_rhe7
+{
+    BSUB_CPUS="${BSUB_DEF_CPUS}"
+    if [ -n "$1" ] && [ "$1" -gt 0 ]
+    then
+        BSUB_CPUS="$1"
+        shift
+    fi
+    bsub_term_send "${BSUB_PROJ_CODE}" "${BSUB_CPUS}" "rhe7" "${BSUB_DEF_MEM}" "x86_64"
+}
+
+function bsub_term
+{
+    BSUB_CPUS="${BSUB_DEF_CPUS}"
+    if [ -n "$1" ] && [ "$1" -gt 0 ]
+    then
+        BSUB_CPUS="$1"
+        shift
+    fi
+    bsub_term_send "${BSUB_PROJ_CODE}" "${BSUB_CPUS}" "${BSUB_DEF_OS_VERSION}" "${BSUB_DEF_MEM}" "${BSUB_DEF_ARCH}"
+}
+
+function bsub_term_arm
+{
+    BSUB_CPUS="${BSUB_DEF_CPUS}"
+    if [ -n "$1" ] && [ "$1" -gt 0 ]
+    then
+        BSUB_CPUS="$1"
+        shift
+    fi
+    bsub_term_send "${BSUB_PROJ_CODE}" "${BSUB_CPUS}" "${BSUB_DEF_OS_VERSION}" "${BSUB_DEF_MEM}" "aarch64"
+}
+
+function bsub_term_alt
+{
+    BSUB_CPUS="${BSUB_DEF_CPUS}"
+    if [ -n "$1" ] && [ "$1" -gt 0 ]
+    then
+        BSUB_CPUS="$1"
+        shift
+    fi
+    bsub_term_send "${BSUB_PROJ_CODE_ALT}" "${BSUB_CPUS}" "${BSUB_DEF_OS_VERSION}" "${BSUB_DEF_MEM}" "${BSUB_DEF_ARCH}"
+}
+
+function bsub_term_alt_alt
+{
+    BSUB_CPUS="${BSUB_DEF_CPUS}"
+    if [ -n "$1" ] && [ "$1" -gt 0 ]
+    then
+        BSUB_CPUS="$1"
+        shift
+    fi
+    bsub_term_send "${BSUB_PROJ_CODE_ALT_ALT}" "${BSUB_CPUS}" "${BSUB_DEF_OS_VERSION}" "${BSUB_DEF_MEM}" "${BSUB_DEF_ARCH}"
+}
+
+finalise_paths
+export CFLAGS=
+export CXXFLAGS=
+export LDFLAGS=
+module_load_if "$(newest_module gnu/gdb/)"
+module_load_if "$(newest_module Zstandard/zstd/)"
+module_load_if "$(newest_module gnu/gcc/)"
+export CC="$(which gcc)"
+export CXX="$(which g++)"
+module_load_if "$(newest_module gnu/binutils/2)"
+module_load_if "$(newest_module python/python/3)"
+module_load_if "$(newest_module shellcheck/shellcheck)"
+if command -v python3 &> /dev/null
+then
+    ln -sf "$(which python3)" "${HOME}/tools/$(rhe_ver_full)/bin/python"
+fi
+module_load_if "$(newest_module git/git/2)"
+. /arm/tools/git/git/2.19.2/rhe7-x86_64/git-2.19.2/contrib/completion/git-completion.bash
+module_load_if "$(newest_module gnu/valgrind/)"
+if command -v valgrind &> /dev/null
+then
+    NEWEST_VALGRIND_DIR="$(dirname "$(which valgrind)")/../"
+    VALGRIND_LDFLAGS="-L${NEWEST_VALGRIND_DIR}/lib"
+    VALGRIND_CFLAGS="-I${NEWEST_VALGRIND_DIR}/include"
+    export VALGRIND_LDFLAGS
+    export VALGRIND_CFLAGS
+fi
+
+module_load_if "$(newest_module llvm/clang)"
+if command -v clang &> /dev/null
+then
+    export CC="$(which clang)"
+fi
+if command -v clang++ &> /dev/null
+then
+    export CXX="$(which clang++)"
+fi
+
+module_load_if "$(newest_module gnu/cmake)"
+
+export CFLAGS
+export CXXFLAGS
+export LDFLAGS
+export RUSTUP_HOME="${HOME}/tools/$(rhe_ver_full)/rustup"
+export CARGO_HOME="${HOME}/tools/$(rhe_ver_full)/cargo"
+if [ -f "${CARGO_HOME}/env" ]
+then
+    . "${CARGO_HOME}/env"
+fi
+finalise_paths
+
+if command -v ccache &> /dev/null
+then
+    CCACHE_BIN="$(which ccache)"
+    ln -sf "${CCACHE_BIN}" "${HOME}/tools/$(rhe_ver_full)/bin/gcc"
+    ln -sf "${CCACHE_BIN}" "${HOME}/tools/$(rhe_ver_full)/bin/g++"
+    ln -sf "${CCACHE_BIN}" "${HOME}/tools/$(rhe_ver_full)/bin/clang"
+    ln -sf "${CCACHE_BIN}" "${HOME}/tools/$(rhe_ver_full)/bin/clang++"
+fi
+
+export GCC_COLORS="error=01;31:warning=01;35:note=01;36:caret=01;32:locus=01:quote=01"
+
+export PERF_SYSTEMS_DIR="/arm/projectscratch/ssg/perf_models/users/ryahar02/"
+
+if ! command -v nvim &> /dev/null
+then
+    module_load_if "$(newest_module neovim/neovim)"
+fi
+
+if [ -d "${XDG_DATA_HOME}/nvim" ] && [ ! -a "${XDG_DATA_HOME}/nvimpager" ]
+then
+    ln -sf "${XDG_DATA_HOME}/nvim" "${XDG_DATA_HOME}/nvimpager"
+fi
+
+export ARM_DISABLE_ANALYTICS="disable_analytics"
+export XCURSOR_SIZE="16"
+unalias less &> /dev/null
+alias big_less="$(which less) -n"
+if nvim -v &> /dev/null
+then
+    VISUAL=nvim
+    EDITOR=nvim
+    export VISUAL
+    export EDITOR
+    export PAGER="nvimpager"
+    export MANPAGER="${PAGER}"
+    alias less="${PAGER}"
+    alias vim="nvim"
+    alias vimdiff="nvim -d"
+fi
+
+alias tmux="tmux -u"
+alias ls="ls --color=auto"
+alias grep="grep --color=auto"
+alias gotowork="cd ${PERF_SYSTEMS_DIR}"
+alias perf_env="bash --init-file ${PERF_SYSTEMS_DIR}/modelbase-env/source-env"
+
+function perf_shell_dbg
+{
+    echo "libtool --mode=execute gdb --args $(which perf_shell)"
+}
+
+function bjobs_top10
+{
+    bjobs -u all -w | tr -s [:space:] | cut -d ' ' -f 2 | sort | uniq -c | sort -n | tail -10
+}
+
+alias bash_posix="env -i ENV=${HOME}/.bashposix bash -i -o posix"
+
+# vim: set ft=bash:

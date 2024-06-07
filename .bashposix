@@ -1,0 +1,9 @@
+. /arm/tools/setup/init/bash
+module purge
+. /arm/tools/setup/init/bash
+module load arm
+ulimit -s 65536
+export PS1='\u@\h:\w\\$ '
+export HOME=/home/ryahar02
+
+# vim: set ft=bash:
